@@ -224,38 +224,11 @@ def overview():
     st.caption("Metrics reflect records stored in the local TRACE-SOC SQLite database. They are not live endpoint telemetry unless collection is running.")
 
 
+from dashboard.pages.alerts import render_alert_management
+
+
 def alert_management():
-    page_header("Alert Management", "Triage detections, document analyst decisions and retain a status-change audit trail.", "OPERATIONS  /  ALERT TRIAGE")
-    f1, f2, f3 = st.columns([1, 1, 2])
-    status = f1.selectbox("Status", ["ALL", *ALERT_STATUSES])
-    severity = f2.selectbox("Severity", ["ALL", *SEVERITIES])
-    search = f3.text_input("Search rule, host, user or IP", placeholder="e.g. TS001, LAB-PC, 10.0.0.99")
-    alerts = get_alerts(status=status, severity=severity, search=search)
-    st.markdown(f"<span class='status-pill'>{len(alerts)} ALERT(S) MATCHED</span>", unsafe_allow_html=True)
-    show_table([{k:a.get(k) for k in ["id","rule_id","rule_name","severity","status","hostname","username","source_ip","event_count","created_at_utc"]} for a in alerts])
-    if not alerts:
-        return
-    st.write("")
-    section_title("ANALYST ACTION", "Select an alert to update its workflow status")
-    ids = [a["id"] for a in alerts]
-    selected = st.selectbox("Alert", ids, format_func=lambda x: f"#{x} — {next(a['rule_name'] for a in alerts if a['id']==x)}")
-    chosen = next(a for a in alerts if a["id"] == selected)
-    st.markdown(f"**{chosen['rule_id']} · {chosen['severity']}**  — {chosen.get('description') or 'No description'}")
-    a, b = st.columns([1, 2])
-    current = chosen.get("status", "NEW")
-    new_status = a.selectbox("New status", ALERT_STATUSES, index=ALERT_STATUSES.index(current) if current in ALERT_STATUSES else 0)
-    note = b.text_input("Analyst note (optional)", key=f"note_{selected}", placeholder="Record triage reasoning or next action")
-    if st.button("Save status change", type="primary"):
-        try:
-            if update_alert_status(selected, new_status, note):
-                st.success("Status saved. The change was added to the alert history.")
-                st.rerun()
-            else:
-                st.error("Alert not found.")
-        except ValueError as exc:
-            st.error(str(exc))
-    with st.expander("VIEW STATUS CHANGE HISTORY"):
-        show_table(get_alert_status_history(selected), "No status changes recorded for this alert.")
+    render_alert_management()
 
 
 def investigations():
