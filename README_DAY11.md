@@ -59,3 +59,15 @@ The new dashboard data-access tests use a temporary SQLite database and do not m
 - Evidence `VERIFIED` means the stored raw XML blob matches its recorded SHA-256 baseline. It does not independently prove original acquisition authenticity.
 - Correlation confidence is a heuristic relationship-strength score, not a probability that an attack occurred.
 - Dashboard status history records transitions made through this dashboard. It cannot reconstruct status changes that happened before the history table existed.
+
+## Day 11 dark SOC theme refresh
+
+The analyst workspace now uses a dark navy SOC theme with cyan/blue accents, severity-aware chart colors, redesigned metric cards, a command-center overview banner, and consistent page headers. Streamlit theme defaults are configured in `.streamlit/config.toml` and the app-level CSS styles the dashboard components.
+
+Run from the project root:
+
+```powershell
+.venv\Scripts\python.exe -m streamlit run dashboard/app.py
+```
+
+The refresh button reruns the current page and reloads values from the local SQLite database. Dashboard metrics remain local database snapshots; they are not live endpoint telemetry unless collection is running.
