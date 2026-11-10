@@ -1,0 +1,5 @@
+pydantic>=2.0
+streamlit>=1.40
+plotly>=5.20
+reportlab>=4.0
+pytest>=8.0
