@@ -178,3 +178,148 @@ def get_distinct_values(column: str):
         rows=connection.execute(f"SELECT DISTINCT {allowed[column]} FROM {table} WHERE {allowed[column]} IS NOT NULL AND {allowed[column]}!='' ORDER BY 1").fetchall()
         return [row[0] for row in rows]
     finally: connection.close()
+
+
+import hashlib
+import json as _json
+
+
+def get_alert_linked_evidence(alert_id: int) -> list[dict]:
+    """
+    Return normalized event details for every event ID stored in an
+    alert's evidence_json. Each record is joined with its raw_event
+    so the caller gets both the structured fields and the raw XML blob.
+    """
+    connection = get_connection()
+    connection.row_factory = sqlite3.Row
+    try:
+        alert_row = connection.execute(
+            "SELECT evidence_json FROM alerts WHERE id=?",
+            (int(alert_id),),
+        ).fetchone()
+
+        if alert_row is None:
+            return []
+
+        evidence_json = alert_row["evidence_json"]
+        if not evidence_json:
+            return []
+
+        try:
+            evidence = _json.loads(evidence_json)
+        except (_json.JSONDecodeError, TypeError):
+            return []
+
+        # Support both {"normalized_event_ids": [...]} and plain [...]
+        if isinstance(evidence, dict):
+            event_ids = evidence.get("normalized_event_ids", [])
+            if not event_ids:
+                event_ids = evidence.get("event_ids", [])
+        elif isinstance(evidence, list):
+            event_ids = evidence
+        else:
+            return []
+
+        if not isinstance(event_ids, list) or not event_ids:
+            return []
+
+        # Deduplicate and validate
+        clean_ids = []
+        seen = set()
+        for eid in event_ids:
+            try:
+                val = int(eid)
+                if val not in seen:
+                    seen.add(val)
+                    clean_ids.append(val)
+            except (TypeError, ValueError):
+                continue
+
+        if not clean_ids:
+            return []
+
+        placeholders = ",".join("?" * len(clean_ids))
+        rows = connection.execute(f"""
+            SELECT
+                ne.id              AS normalized_event_id,
+                ne.event_id        AS windows_event_id,
+                ne.timestamp_utc,
+                ne.hostname,
+                ne.username,
+                ne.source_ip,
+                ne.destination_ip,
+                ne.image,
+                ne.command_line,
+                ne.event_type,
+                ne.provider,
+                ne.channel,
+                ne.extra_data_json,
+                ne.raw_event_id,
+                re.source_file,
+                re.raw_xml_sha256   AS stored_sha256,
+                re.raw_xml
+            FROM normalized_events ne
+            LEFT JOIN raw_events re ON re.id = ne.raw_event_id
+            WHERE ne.id IN ({placeholders})
+            ORDER BY ne.timestamp_utc, ne.id
+        """, clean_ids).fetchall()
+
+        results = []
+        for row in rows:
+            item = dict(row)
+            # Decode raw XML bytes → string for display
+            raw = item.pop("raw_xml", None)
+            if raw is not None:
+                if isinstance(raw, (bytes, bytearray)):
+                    item["raw_xml_text"] = raw.decode("utf-8", errors="replace")
+                else:
+                    item["raw_xml_text"] = str(raw)
+            else:
+                item["raw_xml_text"] = None
+            results.append(item)
+
+        return results
+
+    finally:
+        connection.close()
+
+
+def verify_linked_raw_evidence(raw_event_id: int) -> dict:
+    """
+    Recompute SHA-256 of the stored raw XML blob and compare it
+    against the recorded baseline hash. Returns a status dict.
+    """
+    connection = get_connection()
+    connection.row_factory = sqlite3.Row
+    try:
+        row = connection.execute(
+            "SELECT id, raw_xml, raw_xml_sha256, source_file FROM raw_events WHERE id=?",
+            (int(raw_event_id),),
+        ).fetchone()
+
+        if row is None:
+            return {"status": "NOT_FOUND", "raw_event_id": raw_event_id}
+
+        blob = row["raw_xml"] or b""
+        if isinstance(blob, str):
+            blob = blob.encode("utf-8")
+
+        actual = hashlib.sha256(blob).hexdigest()
+        expected = row["raw_xml_sha256"]
+
+        if expected and actual == expected:
+            status = "VERIFIED"
+        elif expected:
+            status = "MISMATCH"
+        else:
+            status = "NO_BASELINE"
+
+        return {
+            "raw_event_id": row["id"],
+            "source_file": row["source_file"],
+            "status": status,
+            "expected_sha256": expected,
+            "actual_sha256": actual,
+        }
+    finally:
+        connection.close()

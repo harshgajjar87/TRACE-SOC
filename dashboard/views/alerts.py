@@ -3,12 +3,16 @@
 
 import streamlit as st
 
+import json
+
 from dashboard.data_access import (
     ALERT_STATUSES,
     SEVERITIES,
     get_alerts,
     update_alert_status,
     get_alert_status_history,
+    get_alert_linked_evidence,
+    verify_linked_raw_evidence,
 )
 
 
@@ -226,6 +230,149 @@ def render_alert_management():
         )
 
     # -------------------------------------------------
+    # LINKED DIGITAL EVIDENCE
+    # -------------------------------------------------
+
+    st.divider()
+    st.subheader("🔗 Linked Digital Evidence")
+
+    linked_evidence = get_alert_linked_evidence(selected_id)
+
+    if not linked_evidence:
+        st.warning(
+            "No linked normalized event records found for this alert. "
+            "The alert may have been generated before event linkage "
+            "was introduced, or the evidence_json contains no recognized "
+            "normalized_event_ids."
+        )
+
+        # Still show the raw evidence_json for debugging
+        with st.expander("Raw evidence_json (debug)"):
+            raw_ev = selected_alert.get("evidence_json")
+            if raw_ev:
+                try:
+                    st.json(json.loads(raw_ev))
+                except (json.JSONDecodeError, TypeError):
+                    st.code(raw_ev)
+            else:
+                st.info("No evidence_json attached to this alert.")
+
+    else:
+        st.success(f"{len(linked_evidence)} linked event record(s) found.")
+
+        # ── Normalized event summary table ────────────────────────────
+        st.markdown("#### Normalized Event Records")
+        summary_rows = [{
+            "norm_id":    ev.get("normalized_event_id"),
+            "event_id":   ev.get("windows_event_id"),
+            "timestamp":  str(ev.get("timestamp_utc") or "")[:19].replace("T", " "),
+            "hostname":   ev.get("hostname") or "—",
+            "username":   ev.get("username") or "—",
+            "source_ip":  ev.get("source_ip") or "—",
+            "image":      str(ev.get("image") or "")[-55:] or "—",
+            "raw_id":     ev.get("raw_event_id"),
+        } for ev in linked_evidence]
+
+        st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+
+        # ── Per-event detail + XML + integrity ───────────────────────
+        st.markdown("#### Original XML Evidence & Integrity Verification")
+        st.caption(
+            "VERIFIED means the stored XML blob matches its recorded "
+            "SHA-256 baseline. It does not independently prove "
+            "original acquisition authenticity."
+        )
+
+        _STATUS_COLORS = {
+            "VERIFIED":    "#34d399",
+            "MISMATCH":    "#fb7185",
+            "NO_BASELINE": "#fbbf24",
+            "NOT_FOUND":   "#94a3b8",
+        }
+
+        for ev in linked_evidence:
+            norm_id  = ev.get("normalized_event_id")
+            raw_id   = ev.get("raw_event_id")
+            win_eid  = ev.get("windows_event_id") or "?"
+            ts       = str(ev.get("timestamp_utc") or "")[:19].replace("T", " ")
+            host     = ev.get("hostname") or "—"
+            label    = f"Event {win_eid}  ·  {ts}  ·  {host}  (norm #{norm_id})"
+
+            with st.expander(label):
+                # Structured fields
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Event fields**")
+                    for field, value in [
+                        ("Windows Event ID", ev.get("windows_event_id")),
+                        ("Provider",         ev.get("provider")),
+                        ("Channel",          ev.get("channel")),
+                        ("Event Type",       ev.get("event_type")),
+                        ("Hostname",         ev.get("hostname")),
+                        ("Username",         ev.get("username")),
+                        ("Source IP",        ev.get("source_ip")),
+                        ("Destination IP",   ev.get("destination_ip")),
+                    ]:
+                        if value:
+                            st.write(f"**{field}:** {value}")
+
+                with c2:
+                    st.markdown("**Process / command**")
+                    for field, value in [
+                        ("Image",        ev.get("image")),
+                        ("Command line", ev.get("command_line")),
+                    ]:
+                        if value:
+                            st.write(f"**{field}:** `{value}`")
+
+                    extra = ev.get("extra_data_json")
+                    if extra:
+                        try:
+                            st.markdown("**Extra data**")
+                            st.json(json.loads(extra))
+                        except (json.JSONDecodeError, TypeError):
+                            st.write(extra)
+
+                # Integrity check
+                st.markdown("**Integrity verification**")
+                if raw_id:
+                    result = verify_linked_raw_evidence(raw_id)
+                    vstatus = result.get("status", "UNKNOWN")
+                    vcolor  = _STATUS_COLORS.get(vstatus, "#94a3b8")
+                    st.markdown(
+                        f"<span style='background:{vcolor}22;"
+                        f"border:1px solid {vcolor};border-radius:6px;"
+                        f"padding:3px 10px;color:{vcolor};"
+                        f"font-weight:700;font-size:.85rem;'>"
+                        f"{vstatus}</span>"
+                        f"&nbsp;&nbsp;"
+                        f"<span style='color:#7a96b4;font-size:.8rem;'>"
+                        f"raw_event #{raw_id} · "
+                        f"Source: {result.get('source_file') or '—'}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    if vstatus == "MISMATCH":
+                        st.error(
+                            f"Hash mismatch — stored XML may have been altered.  \n"
+                            f"Expected: `{result.get('expected_sha256')}`  \n"
+                            f"Actual:   `{result.get('actual_sha256')}`"
+                        )
+                    elif vstatus == "VERIFIED":
+                        st.caption(
+                            f"SHA-256: `{result.get('actual_sha256')}`"
+                        )
+                else:
+                    st.caption("No raw_event_id — cannot verify integrity.")
+
+                # Raw XML
+                xml_text = ev.get("raw_xml_text")
+                if xml_text:
+                    st.markdown("**Raw Windows XML**")
+                    st.code(xml_text, language="xml")
+                else:
+                    st.caption("No raw XML stored for this event.")
+
+    # -------------------------------------------------
     # STATUS UPDATE
     # -------------------------------------------------
 
@@ -308,31 +455,15 @@ def render_alert_management():
         )
 
     # -------------------------------------------------
-    # RAW ALERT EVIDENCE
+    # RAW ALERT EVIDENCE (preserved for reference)
     # -------------------------------------------------
 
-    st.divider()
-
-    with st.expander("View Original Alert Evidence"):
-
-        import json
-
+    with st.expander("View raw evidence_json"):
         evidence = selected_alert.get("evidence_json")
-
         if evidence:
-
             try:
-                parsed_evidence = json.loads(evidence)
-
-                st.json(parsed_evidence)
-
+                st.json(json.loads(evidence))
             except (json.JSONDecodeError, TypeError):
-                st.warning(
-                    "Alert evidence is not valid JSON."
-                )
-
+                st.warning("Alert evidence is not valid JSON.")
         else:
-
-            st.info(
-                "No evidence JSON is attached to this alert."
-            )
+            st.info("No evidence JSON is attached to this alert.")

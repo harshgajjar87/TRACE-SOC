@@ -111,29 +111,47 @@ def save_story(connection, group, evidence_map):
     return story_id
 
 
-def build_and_save_stories():
+
+def build_and_save_stories(events=None):
     print("\n========== TRACE-SOC STORY BUILDER ==========\n")
-    events = get_all_events()
+
+    # Use supplied events for bounded automated analysis.
+    # Keep the old full-history behavior for manual execution.
+    if events is None:
+        events = get_all_events()
+
     print("Events loaded:", len(events))
+
     groups = build_correlation_groups(events)
     print("Correlation groups found:", len(groups))
+
     connection = get_connection()
     connection.row_factory = sqlite3.Row
+
     saved = []
+
     try:
         evidence_map = load_alert_evidence(connection)
+
         with connection:
             for group in groups:
-                story_id = save_story(connection, group, evidence_map)
+                story_id = save_story(
+                    connection,
+                    group,
+                    evidence_map,
+                )
+
                 if story_id is not None:
                     saved.append(story_id)
+
     finally:
         connection.close()
+
     print("Stories created or updated:", len(saved))
     print("Story IDs:", saved)
     print("\n=============================================\n")
-    return saved
 
+    return saved
 
 if __name__ == "__main__":
     build_and_save_stories()

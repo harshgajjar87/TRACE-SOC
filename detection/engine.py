@@ -500,15 +500,31 @@ def evaluate_keyword_rule(events, rule):
             if keyword.lower() in command
         ]
 
-        if matched_keywords:
+        if not matched_keywords:
+            continue
 
-            alerts.append(
-                make_alert(
-                    rule,
-                    [event],
-                    matched_keywords=matched_keywords
-                )
+        suppress_parents = [
+            s.lower()
+            for s in rule.get("suppress_parent_cmdline_contains", [])
+        ]
+
+        if suppress_parents:
+            extra = get_extra_data(event)
+            parent_cmdline = str(
+                get_field(event, "parent_command_line", "ParentCommandLine")
+                or extra.get("ParentCommandLine")
+                or ""
+            ).lower()
+            if any(s in parent_cmdline for s in suppress_parents):
+                continue
+
+        alerts.append(
+            make_alert(
+                rule,
+                [event],
+                matched_keywords=matched_keywords
             )
+        )
 
     return alerts
 
@@ -981,6 +997,33 @@ def evaluate_file_rule(events, rule):
 # 7. SINGLE EVENT DETECTION
 # ==========================================================
 
+def _is_suppressed_by_sid(event, rule):
+    """
+    Return True when an event's SubjectUserSid matches one of the
+    exact SIDs or SID prefixes listed in the rule's suppression keys.
+
+    This is used by TS016 to skip routine built-in service accounts
+    (SYSTEM, LOCAL SERVICE, NETWORK SERVICE, DWM, per-service SIDs)
+    while still alerting on real user accounts.
+    """
+    exact_sids = rule.get("suppress_subject_sids", [])
+    sid_prefixes = rule.get("suppress_subject_sid_prefixes", [])
+
+    if not exact_sids and not sid_prefixes:
+        return False
+
+    extra = get_extra_data(event)
+    subject_sid = (extra.get("SubjectUserSid") or "").strip()
+
+    if not subject_sid:
+        return False
+
+    if subject_sid in exact_sids:
+        return True
+
+    return any(subject_sid.startswith(p) for p in sid_prefixes)
+
+
 def evaluate_single_event_rule(events, rule):
 
     alerts = []
@@ -988,6 +1031,9 @@ def evaluate_single_event_rule(events, rule):
     for event in events:
 
         if not event_matches(event, rule):
+            continue
+
+        if _is_suppressed_by_sid(event, rule):
             continue
 
         alerts.append(

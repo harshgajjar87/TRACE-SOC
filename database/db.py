@@ -18,6 +18,9 @@ def get_connection():
 
     connection = sqlite3.connect(DATABASE_PATH)
 
+    # Return rows as sqlite3.Row objects so dict(row) works correctly
+    connection.row_factory = sqlite3.Row
+
     # Enable foreign key constraints
     connection.execute("PRAGMA foreign_keys = ON")
 

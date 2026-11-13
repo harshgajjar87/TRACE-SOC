@@ -1,0 +1,105 @@
+================================================================
+  TRACE-SOC  —  HOW TO START THE PROJECT
+================================================================
+
+LOCATION:  D:\TRACE-SOC
+PYTHON:    D:\TRACE-SOC\.venv\Scripts\python.exe
+
+
+----------------------------------------------------------------
+1.  LAUNCH THE DASHBOARD  (do this every session)
+----------------------------------------------------------------
+
+Open PowerShell, then run:
+
+    cd D:\TRACE-SOC
+    .venv\Scripts\python.exe -m streamlit run dashboard/app.py
+
+Open your browser at:  http://localhost:8501
+
+Press Ctrl+C in PowerShell to stop the dashboard.
+
+
+----------------------------------------------------------------
+2.  FULL DATA PIPELINE  (run when you have new XML events)
+----------------------------------------------------------------
+
+Step 1 — Collect XML files from data/samples into JSONL:
+
+    .venv\Scripts\python.exe -m collectors.xml_collector
+
+Step 2 — Import JSONL into the SQLite database:
+
+    .venv\Scripts\python.exe -m database.import_events
+
+Step 3 — Run the detection engine (creates alerts):
+
+    .venv\Scripts\python.exe -m detection.engine
+
+Step 4 — Build investigation stories from correlated alerts:
+
+    .venv\Scripts\python.exe -m investigation.story_builder
+
+
+----------------------------------------------------------------
+3.  RUN ALL TESTS
+----------------------------------------------------------------
+
+    .venv\Scripts\python.exe -m pytest tests/ -v
+
+
+----------------------------------------------------------------
+4.  USEFUL ONE-OFF COMMANDS
+----------------------------------------------------------------
+
+Initialize / migrate database tables:
+    .venv\Scripts\python.exe -m database.db
+    .venv\Scripts\python.exe -m investigation.story_schema
+
+Print attack timeline for story ID 1:
+    .venv\Scripts\python.exe -c "from investigation.timeline import print_story_timeline; print_story_timeline(1)"
+
+List all investigation stories:
+    .venv\Scripts\python.exe -c "from investigation.investigation_queries import list_stories; [print(x) for x in list_stories()]"
+
+Verify raw evidence integrity:
+    .venv\Scripts\python.exe -c "from investigation.evidence import verify_raw_event_integrity; print(verify_raw_event_integrity(1))"
+
+
+----------------------------------------------------------------
+5.  GIT — SAVE YOUR PROGRESS
+----------------------------------------------------------------
+
+    git add -A
+    git commit -m "Your message here"
+    git push -u origin master        (after creating repo on GitHub)
+
+
+----------------------------------------------------------------
+6.  PROJECT STRUCTURE (quick reference)
+----------------------------------------------------------------
+
+    collectors/         XML collection from Windows event files
+    normalizer/         Parse and normalize event fields
+    database/           SQLite schema, import, queries
+    detection/          Detection rules and engine
+    investigation/      Correlation, story builder, timeline
+    dashboard/          Streamlit UI (app.py + pages/)
+    reports/            PDF report generator
+    hunting/            Threat hunting engine
+    tests/              All automated tests
+    data/samples/       Source XML event files
+    data/processed/     JSONL collector output
+    data/tracesoc.db    SQLite database (DO NOT DELETE)
+    .streamlit/         Dark theme config
+
+
+----------------------------------------------------------------
+7.  REQUIREMENTS
+----------------------------------------------------------------
+
+Install all dependencies (run once after a fresh clone):
+
+    .venv\Scripts\python.exe -m pip install -r requirements.txt
+
+================================================================

@@ -107,7 +107,14 @@ DETECTION_RULES = [
             " -hidden"
         ],
         "mitre_tactic": "Execution",
-        "mitre_technique": "T1059.001"
+        "mitre_technique": "T1059.001",
+        # Suppress PowerShell invocations spawned by TRACE-SOC's own
+        # monitoring runner — it uses -EncodedCommand to pass XPath
+        # filters to Get-WinEvent, which is routine collector behaviour.
+        "suppress_parent_cmdline_contains": [
+            "monitoring.runner",
+            "collectors.windows_event_collector",
+        ],
     },
 
     {
@@ -256,15 +263,41 @@ DETECTION_RULES = [
     {
         "rule_id": "TS016",
         "name": "Special Privileges Assigned",
-        "description": "A logon session received special privileges.",
+        "description": (
+            "A logon session received special privileges. "
+            "Built-in Windows service accounts (SYSTEM, LOCAL SERVICE, "
+            "NETWORK SERVICE, service SIDs) are suppressed because their "
+            "4672 events are routine OS behaviour. Real user accounts and "
+            "unrecognised service SIDs are still alerted."
+        ),
         "category": "privilege_escalation",
         "rule_type": "single_event",
         "severity": "MEDIUM",
         "provider": "Microsoft-Windows-Security-Auditing",
         "channel": "Security",
         "event_id": "4672",
+        # Well-known built-in Windows SIDs whose 4672 events are
+        # routine OS activity and should not generate alerts.
+        # S-1-5-18  = SYSTEM
+        # S-1-5-19  = LOCAL SERVICE
+        # S-1-5-20  = NETWORK SERVICE
+        # S-1-5-17  = IUSR (IIS anonymous)
+        # S-1-5-90-* = Desktop Window Manager (DWM-N)
+        # S-1-5-96-* = Virtual machine service accounts
+        "suppress_subject_sids": [
+            "S-1-5-18",
+            "S-1-5-19",
+            "S-1-5-20",
+            "S-1-5-17",
+        ],
+        # SID prefix patterns — any SID starting with these is suppressed.
+        "suppress_subject_sid_prefixes": [
+            "S-1-5-90-",   # DWM accounts
+            "S-1-5-96-",   # Virtual service accounts
+            "S-1-5-80-",   # Per-service SIDs (e.g. IntelTelemetryAgent)
+        ],
         "mitre_tactic": "Privilege Escalation",
-        "mitre_technique": "T1078"
+        "mitre_technique": "T1078",
     },
 
     {

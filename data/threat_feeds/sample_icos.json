@@ -1,0 +1,30 @@
+
+[
+  {
+    "indicator": "198.51.100.25",
+    "type": "IP",
+    "source": "TRACE-SOC Training Feed",
+    "confidence": 85,
+    "severity": "HIGH",
+    "description": "Synthetic suspicious IP for IOC enrichment testing",
+    "tags": ["training", "synthetic", "network"]
+  },
+  {
+    "indicator": "example-malware.test",
+    "type": "DOMAIN",
+    "source": "TRACE-SOC Training Feed",
+    "confidence": 90,
+    "severity": "CRITICAL",
+    "description": "Synthetic domain for domain IOC testing",
+    "tags": ["training", "synthetic", "domain"]
+  },
+  {
+    "indicator": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "type": "MD5",
+    "source": "TRACE-SOC Training Feed",
+    "confidence": 75,
+    "severity": "MEDIUM",
+    "description": "Synthetic MD5 value for file hash matching tests",
+    "tags": ["training", "synthetic", "hash"]
+  }
+]

@@ -399,3 +399,109 @@ def test_brute_force_below_threshold_does_not_alert():
     alerts = evaluate_threshold_rule(events, rule)
 
     assert len(alerts) == 0
+
+
+# --------------------------------------------------
+# TS016 — SPECIAL PRIVILEGES ASSIGNED (SID SUPPRESSION)
+# --------------------------------------------------
+
+def _make_4672_event(subject_sid, subject_username, event_id=1):
+    """Build a minimal normalized event that matches TS016."""
+    return {
+        "id": event_id,
+        "event_id": "4672",
+        "provider": "Microsoft-Windows-Security-Auditing",
+        "channel": "Security",
+        "timestamp_utc": "2026-11-11T10:00:00+00:00",
+        "hostname": "TEST-PC",
+        "username": subject_username,
+        "extra_data_json": json.dumps({
+            "SubjectUserName": subject_username,
+            "SubjectUserSid": subject_sid,
+            "SubjectLogonId": "0x3e7",
+            "PrivilegeList": "SeDebugPrivilege\nSeBackupPrivilege",
+        }),
+    }
+
+
+def test_ts016_suppresses_system_account():
+    """SYSTEM (S-1-5-18) must not generate a TS016 alert."""
+    rule = get_rule("TS016")
+    event = _make_4672_event("S-1-5-18", "SYSTEM")
+    alerts = evaluate_single_event_rule([event], rule)
+    assert alerts == [], "SYSTEM 4672 should be suppressed"
+
+
+def test_ts016_suppresses_local_service():
+    """LOCAL SERVICE (S-1-5-19) must not generate a TS016 alert."""
+    rule = get_rule("TS016")
+    event = _make_4672_event("S-1-5-19", "LOCAL SERVICE")
+    alerts = evaluate_single_event_rule([event], rule)
+    assert alerts == [], "LOCAL SERVICE 4672 should be suppressed"
+
+
+def test_ts016_suppresses_network_service():
+    """NETWORK SERVICE (S-1-5-20) must not generate a TS016 alert."""
+    rule = get_rule("TS016")
+    event = _make_4672_event("S-1-5-20", "NETWORK SERVICE")
+    alerts = evaluate_single_event_rule([event], rule)
+    assert alerts == [], "NETWORK SERVICE 4672 should be suppressed"
+
+
+def test_ts016_suppresses_iusr():
+    """IUSR (S-1-5-17) must not generate a TS016 alert."""
+    rule = get_rule("TS016")
+    event = _make_4672_event("S-1-5-17", "IUSR")
+    alerts = evaluate_single_event_rule([event], rule)
+    assert alerts == [], "IUSR 4672 should be suppressed"
+
+
+def test_ts016_suppresses_dwm_prefix():
+    """DWM accounts (S-1-5-90-*) must not generate a TS016 alert."""
+    rule = get_rule("TS016")
+    event = _make_4672_event("S-1-5-90-0-1", "DWM-1")
+    alerts = evaluate_single_event_rule([event], rule)
+    assert alerts == [], "DWM 4672 should be suppressed via SID prefix"
+
+
+def test_ts016_suppresses_per_service_sid_prefix():
+    """Per-service SIDs (S-1-5-80-*) must not generate a TS016 alert."""
+    rule = get_rule("TS016")
+    event = _make_4672_event(
+        "S-1-5-80-863171341-2975503981-1811344707-3769924460-3995132968",
+        "IntelTelemetryAgent",
+    )
+    alerts = evaluate_single_event_rule([event], rule)
+    assert alerts == [], "Per-service SID 4672 should be suppressed"
+
+
+def test_ts016_fires_for_real_user_account():
+    """A real user account must still trigger a TS016 alert."""
+    rule = get_rule("TS016")
+    event = _make_4672_event(
+        "S-1-5-21-2036092497-1664975535-1205397107-1001",
+        "HP",
+    )
+    alerts = evaluate_single_event_rule([event], rule)
+    assert len(alerts) == 1, "Real user account 4672 must generate an alert"
+    assert alerts[0]["rule"]["rule_id"] == "TS016"
+
+
+def test_ts016_fires_when_no_sid_in_event():
+    """
+    If the event carries no SubjectUserSid, the suppression check
+    cannot match and the alert should still fire (fail-open).
+    """
+    rule = get_rule("TS016")
+    event = {
+        "id": 99,
+        "event_id": "4672",
+        "provider": "Microsoft-Windows-Security-Auditing",
+        "channel": "Security",
+        "timestamp_utc": "2026-11-11T10:00:00+00:00",
+        "hostname": "TEST-PC",
+        "username": None,
+        "extra_data_json": json.dumps({}),
+    }
+    alerts = evaluate_single_event_rule([event], rule)
+    assert len(alerts) == 1, "Event with no SID must not be silently dropped"
