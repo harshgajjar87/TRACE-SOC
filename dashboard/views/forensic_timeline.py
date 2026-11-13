@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+from datetime import datetime, date, time as dt_time, timedelta, timezone
 import streamlit as st
 
 from forensics.timeline import build_forensic_timeline, get_timeline_summary
 from forensics.engine import ARTIFACT_TYPES, ARTIFACT_STATUSES
+from database.db import get_connection
+
+
+def _get_db_time_bounds() -> tuple[date, date]:
+    """Return earliest and latest date in normalized_events, defaulting to recent week."""
+    try:
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT MIN(timestamp_utc), MAX(timestamp_utc) FROM normalized_events"
+        ).fetchone()
+        conn.close()
+        if row and row[0] and row[1]:
+            d_min = datetime.fromisoformat(str(row[0])[:19]).date()
+            d_max = datetime.fromisoformat(str(row[1])[:19]).date()
+            return d_min, d_max
+    except Exception:
+        pass
+    today = datetime.now(timezone.utc).date()
+    return today - timedelta(days=7), today
 
 
 _SOURCE_COLORS = {
@@ -31,10 +51,88 @@ def render_forensic_timeline():
 
     # Filters
     st.markdown("<div class='section-kicker'>TIMELINE FILTERS</div>", unsafe_allow_html=True)
-    f1, f2, f3 = st.columns([2, 1, 1])
-    hostname = f1.text_input("Hostname (partial match)", key="tl_host")
-    start_time = f2.text_input("Start time (ISO UTC)", placeholder="2024-01-01T00:00:00", key="tl_start")
-    end_time = f3.text_input("End time (ISO UTC)", placeholder="2024-12-31T23:59:59", key="tl_end")
+
+    f_host, f_preset = st.columns([1.5, 1.5])
+    with f_host:
+        hostname = st.text_input(
+            "Hostname (partial match)",
+            placeholder="e.g. LAB-PC, HarshGajjar",
+            key="tl_host",
+        )
+    with f_preset:
+        preset = st.selectbox(
+            "Time Range Preset",
+            [
+                "All Available Time",
+                "Full Database Range",
+                "Last 24 Hours",
+                "Last 3 Days",
+                "Last 7 Days",
+                "Custom Date & Time Selection",
+            ],
+            index=0,
+            key="tl_preset",
+        )
+
+    db_min_date, db_max_date = _get_db_time_bounds()
+
+    start_time: str | None = None
+    end_time: str | None = None
+
+    if preset == "All Available Time":
+        start_time = None
+        end_time = None
+        st.caption("ℹ️ Showing all chronological events without time constraints.")
+
+    elif preset == "Full Database Range":
+        start_time = f"{db_min_date.isoformat()}T00:00:00"
+        end_time = f"{db_max_date.isoformat()}T23:59:59"
+        st.caption(f"🗓️ Entire recorded activity window: **{db_min_date}** to **{db_max_date}**.")
+
+    elif preset == "Last 24 Hours":
+        now = datetime.now(timezone.utc)
+        start_dt = now - timedelta(hours=24)
+        start_time = start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        end_time = now.strftime("%Y-%m-%dT%H:%M:%S")
+        st.caption(f"⏱️ Filtering from **{start_time.replace('T', ' ')} UTC** to **{end_time.replace('T', ' ')} UTC**.")
+
+    elif preset == "Last 3 Days":
+        now = datetime.now(timezone.utc)
+        start_dt = now - timedelta(days=3)
+        start_time = start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        end_time = now.strftime("%Y-%m-%dT%H:%M:%S")
+        st.caption(f"⏱️ Filtering from **{start_time.replace('T', ' ')} UTC** to **{end_time.replace('T', ' ')} UTC**.")
+
+    elif preset == "Last 7 Days":
+        now = datetime.now(timezone.utc)
+        start_dt = now - timedelta(days=7)
+        start_time = start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        end_time = now.strftime("%Y-%m-%dT%H:%M:%S")
+        st.caption(f"⏱️ Filtering from **{start_time.replace('T', ' ')} UTC** to **{end_time.replace('T', ' ')} UTC**.")
+
+    elif preset == "Custom Date & Time Selection":
+        d1, t1, d2, t2 = st.columns(4)
+        with d1:
+            start_date = st.date_input("Start Date", value=db_min_date, key="tl_start_date")
+        with t1:
+            start_time_val = st.time_input("Start Time (UTC)", value=dt_time(0, 0, 0), key="tl_start_time")
+        with d2:
+            end_date = st.date_input("End Date", value=db_max_date, key="tl_end_date")
+        with t2:
+            end_time_val = st.time_input("End Time (UTC)", value=dt_time(23, 59, 59), key="tl_end_time")
+
+        start_time = f"{start_date.isoformat()}T{start_time_val.strftime('%H:%M:%S')}"
+        end_time = f"{end_date.isoformat()}T{end_time_val.strftime('%H:%M:%S')}"
+        st.caption(f"📅 Custom selection: **{start_time.replace('T', ' ')} UTC** → **{end_time.replace('T', ' ')} UTC**")
+
+    with st.expander("⚙️ Manual ISO Timestamp Override (optional)"):
+        use_manual = st.checkbox("Enable manual ISO string entry", value=False, key="tl_manual_chk")
+        if use_manual:
+            m1, m2 = st.columns(2)
+            manual_start = m1.text_input("Start time (ISO UTC)", value=start_time or "", key="tl_man_start")
+            manual_end = m2.text_input("End time (ISO UTC)", value=end_time or "", key="tl_man_end")
+            start_time = manual_start.strip() or None
+            end_time = manual_end.strip() or None
 
     s1, s2, s3, s4 = st.columns(4)
     story_id_raw = s1.number_input("Story ID (0 = all)", min_value=0, step=1, value=0, key="tl_story")
