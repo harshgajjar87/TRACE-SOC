@@ -88,7 +88,10 @@ def render_system_health():
     )
 
     st.write("")
-    tab1, tab2, tab3, tab4 = st.tabs(["🗄️ Tables & Indexes", "🔧 Maintenance", "🧩 Components", "📐 Raw Metrics"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["🗄️ Tables & Indexes", "🔧 Maintenance", "🧩 Components", "📐 Raw Metrics"],
+        key="system_health_active_tab",
+    )
 
     with tab1:
         st.markdown("<div class='section-kicker'>TABLE ROW COUNTS</div>", unsafe_allow_html=True)

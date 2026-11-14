@@ -18,6 +18,7 @@ from threat_intel.correlator import (
     add_analyst_note_to_correlation,
 )
 from threat_intel.engine import IOC_TYPES
+from dashboard.notifications import notify_success
 
 
 _SEV_COLORS = {
@@ -52,8 +53,11 @@ def render_ioc_correlation():
 
     left, right = st.columns([3, 1])
     with right:
-        if st.button("↻ Refresh", use_container_width=True):
+        if st.button("↻ Refresh", key="refresh_ioc_corr_btn", use_container_width=True):
             st.rerun()
+
+    if "ioc_scan_success_msg" in st.session_state:
+        st.success(st.session_state.pop("ioc_scan_success_msg"))
 
     # Summary cards
     summary = get_correlation_summary()
@@ -84,19 +88,21 @@ def render_ioc_correlation():
     # Run correlation engine
     st.markdown("<div class='section-kicker'>RUN IOC CORRELATION SCAN</div>", unsafe_allow_html=True)
     r1, r2, r3 = st.columns([1, 1, 2])
-    ev_limit = r1.number_input("Event limit", min_value=100, max_value=50000, value=5000, step=500)
-    ioc_limit = r2.number_input("IOC limit", min_value=10, max_value=10000, value=2000, step=100)
+    ev_limit = r1.number_input("Event limit", min_value=100, max_value=50000, value=5000, step=500, key="ic_ev_limit")
+    ioc_limit = r2.number_input("IOC limit", min_value=10, max_value=10000, value=2000, step=100, key="ic_ioc_limit")
 
-    if r3.button("▶ Run Correlation Scan", type="primary"):
+    if r3.button("▶ Run Correlation Scan", type="primary", key="btn_run_ioc_scan"):
         with st.spinner("Scanning events against active IOCs…"):
             run_result = run_ioc_correlation(
                 event_limit=int(ev_limit),
                 ioc_limit=int(ioc_limit),
             )
-        st.success(
-            f"Scan complete — {run_result['events_scanned']:,} events, "
-            f"{run_result['iocs_checked']:,} IOCs, "
-            f"{run_result['new_correlations']:,} new correlations found."
+        dup = run_result.get("duplicate_correlations", 0)
+        dup_txt = f" ({dup:,} already existed)" if dup else ""
+        notify_success(
+            f"Scan complete — {run_result['events_scanned']:,} events scanned against "
+            f"{run_result['iocs_checked']:,} active IOCs: "
+            f"{run_result['new_correlations']:,} new correlations found{dup_txt}."
         )
         st.rerun()
 
@@ -170,7 +176,7 @@ def render_ioc_correlation():
                 if st.form_submit_button("Save Note"):
                     ok = add_analyst_note_to_correlation(int(corr_id), note_text)
                     if ok:
-                        st.success("Note saved.")
+                        notify_success(f"Analyst note saved to correlation #{corr_id}.")
                         st.rerun()
                     else:
                         st.warning("Correlation not found.")

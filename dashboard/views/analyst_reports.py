@@ -33,7 +33,10 @@ def render_analyst_reports():
         st.info("No investigation stories are available. Run the detection and correlation engines to generate stories.")
         return
 
-    tab1, tab2, tab3 = st.tabs(["📄 Single Investigation", "📊 Executive Summary", "📋 Batch Export"])
+    tab1, tab2, tab3 = st.tabs(
+        ["📄 Single Investigation", "📊 Executive Summary", "📋 Batch Export"],
+        key="analyst_reports_active_tab",
+    )
 
     with tab1:
         st.markdown("<div class='section-kicker'>SINGLE INVESTIGATION REPORT</div>", unsafe_allow_html=True)

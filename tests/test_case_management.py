@@ -354,3 +354,22 @@ def test_invalid_status_rejected(setup_database):
             performed_by="Analyst A",
             status="UNKNOWN",
         )
+
+
+def test_reject_duplicate_active_case(setup_database):
+
+    create_case(
+        title="Duplicate Check Case",
+        description="First instance.",
+        priority="HIGH",
+        created_by="Analyst A",
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        create_case(
+            title="Duplicate Check Case",
+            description="Second instance.",
+            priority="HIGH",
+            created_by="Analyst B",
+        )
+

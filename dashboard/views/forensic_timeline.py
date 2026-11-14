@@ -47,6 +47,7 @@ def render_forensic_timeline():
     left, right = st.columns([3, 1])
     with right:
         if st.button("↻ Refresh", use_container_width=True):
+            st.session_state.pop("forensic_timeline_data", None)
             st.rerun()
 
     # Filters
@@ -144,12 +145,15 @@ def render_forensic_timeline():
 
     if st.button("Build Timeline", type="primary"):
         story_id = int(story_id_raw) if story_id_raw else None
+        clean_host = hostname.strip() if (hostname and isinstance(hostname, str)) else None
+        clean_start = start_time.strip() if (start_time and isinstance(start_time, str)) else None
+        clean_end = end_time.strip() if (end_time and isinstance(end_time, str)) else None
 
         with st.spinner("Reconstructing timeline…"):
             timeline = build_forensic_timeline(
-                hostname=hostname.strip() or None,
-                start_time=start_time.strip() or None,
-                end_time=end_time.strip() or None,
+                hostname=clean_host or None,
+                start_time=clean_start or None,
+                end_time=clean_end or None,
                 story_id=story_id,
                 include_telemetry=inc_telemetry,
                 include_artifacts=inc_artifacts,
@@ -158,6 +162,15 @@ def render_forensic_timeline():
             )
 
         summary = get_timeline_summary(timeline)
+        st.session_state["forensic_timeline_data"] = {
+            "timeline": timeline,
+            "summary": summary,
+        }
+
+    cached = st.session_state.get("forensic_timeline_data")
+    if cached:
+        timeline = cached["timeline"]
+        summary = cached["summary"]
 
         # Summary metrics
         st.write("")

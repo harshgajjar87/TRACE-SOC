@@ -4,9 +4,10 @@
 import csv
 import io
 import json
-from datetime import date, time, datetime, timezone
+from datetime import date, time, datetime, timezone, timedelta
 
 import streamlit as st
+from dashboard.notifications import notify_success
 
 from hunting.engine import (
     HUNT_TYPES,
@@ -33,6 +34,25 @@ def _date_value(value, fallback):
             return fallback
 
     return fallback
+
+
+def _get_default_date_range() -> tuple[date, date]:
+    """Return default date bounds based on database telemetry, fallback to 14 days ago."""
+    today = datetime.now(timezone.utc).date()
+    try:
+        from database.db import get_connection
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT MIN(timestamp_utc), MAX(timestamp_utc) FROM normalized_events"
+        ).fetchone()
+        conn.close()
+        if row and row[0] and row[1]:
+            d_min = datetime.fromisoformat(str(row[0])[:19]).date()
+            d_max = datetime.fromisoformat(str(row[1])[:19]).date()
+            return d_min, max(d_max, today)
+    except Exception:
+        pass
+    return today - timedelta(days=14), today
 
 def _to_csv(rows):
     if not rows:
@@ -70,6 +90,29 @@ def render_threat_hunting():
 
     create_hunting_schema()
 
+    def_start, def_end = _get_default_date_range()
+
+    # Initialize persistent state defaults so widget interactions (such as date changes)
+    # never reset typed indicators or selected hunting methods.
+    if "hunt_method" not in st.session_state:
+        st.session_state["hunt_method"] = "GENERAL"
+    if "hunt_indicator" not in st.session_state:
+        st.session_state["hunt_indicator"] = ""
+    if "hunt_hostname" not in st.session_state:
+        st.session_state["hunt_hostname"] = ""
+    if "hunt_username" not in st.session_state:
+        st.session_state["hunt_username"] = ""
+    if "hunt_event_id" not in st.session_state:
+        st.session_state["hunt_event_id"] = ""
+    if "hunt_event_type" not in st.session_state:
+        st.session_state["hunt_event_type"] = ""
+    if "hunt_start_date" not in st.session_state:
+        st.session_state["hunt_start_date"] = def_start
+    if "hunt_end_date" not in st.session_state:
+        st.session_state["hunt_end_date"] = def_end
+    if "hunt_limit" not in st.session_state:
+        st.session_state["hunt_limit"] = 300
+
     st.markdown("## 🔎 Advanced Threat Hunting")
 
     st.caption(
@@ -81,7 +124,15 @@ def render_threat_hunting():
     # SAVED HUNTS
     # --------------------------------------------------
 
-    with st.expander("Saved Hunting Queries", expanded=False):
+    if "hunt_saved_success_msg" in st.session_state:
+        st.success(st.session_state.pop("hunt_saved_success_msg"))
+
+    if "hunt_load_msg" in st.session_state:
+        st.info(st.session_state.pop("hunt_load_msg"))
+
+    expand_saved = st.session_state.pop("hunt_saved_expand", False)
+
+    with st.expander("Saved Hunting Queries", expanded=expand_saved):
 
         saved = list_saved_hunts()
 
@@ -111,32 +162,38 @@ def render_threat_hunting():
                 selected_item.get("description") or "No description"
             )
 
-            if st.button("Delete selected saved hunt"):
-                delete_saved_hunt(selected_saved)
-                st.success("Saved hunt deleted.")
-                st.rerun()
+            b_del, b_load = st.columns([1, 2])
+            with b_del:
+                if st.button("Delete selected saved hunt", use_container_width=True):
+                    delete_saved_hunt(selected_saved)
+                    notify_success("Saved hunt deleted.")
+                    st.rerun()
 
-            if st.button("Load selected hunt into search"):
-                st.session_state["hunt_loaded_query"] = (
-                    selected_item["query"]
-                )
-                st.session_state["hunt_loaded_type"] = (
-                    selected_item["hunt_type"]
-                )
-                st.rerun()
+            with b_load:
+                if st.button("Load selected hunt into search", type="primary", use_container_width=True):
+                    q = selected_item.get("query", {})
+                    ht = str(selected_item.get("hunt_type", "GENERAL")).upper()
+                    if ht in HUNT_TYPES:
+                        st.session_state["hunt_method"] = ht
+                    st.session_state["hunt_indicator"] = str(q.get("indicator") or "")
+                    st.session_state["hunt_hostname"] = str(q.get("hostname") or "")
+                    st.session_state["hunt_username"] = str(q.get("username") or "")
+                    st.session_state["hunt_event_id"] = str(q.get("event_id") or "")
+                    st.session_state["hunt_event_type"] = str(q.get("event_type") or "")
+                    if q.get("start_date"):
+                        st.session_state["hunt_start_date"] = _date_value(q["start_date"], def_start)
+                    if q.get("end_date"):
+                        st.session_state["hunt_end_date"] = _date_value(q["end_date"], def_end)
+                    if q.get("limit"):
+                        try:
+                            st.session_state["hunt_limit"] = int(q["limit"])
+                        except (ValueError, TypeError):
+                            pass
+                    st.session_state["hunt_load_msg"] = f"Loaded hunt #{selected_item['id']} — '{selected_item.get('name')}' ({ht}) into search."
+                    st.rerun()
 
         else:
             st.info("No saved hunting queries yet.")
-
-    loaded = st.session_state.pop(
-        "hunt_loaded_query",
-        {}
-    )
-
-    loaded_type = st.session_state.pop(
-        "hunt_loaded_type",
-        "GENERAL"
-    )
 
     # --------------------------------------------------
     # SEARCH FORM
@@ -147,8 +204,6 @@ def render_threat_hunting():
     hunt_type = st.selectbox(
         "Hunting method",
         HUNT_TYPES,
-        index=HUNT_TYPES.index(loaded_type)
-        if loaded_type in HUNT_TYPES else 0,
         format_func=lambda value: {
             "GENERAL": "General event search",
             "IP": "IP address IOC",
@@ -156,60 +211,58 @@ def render_threat_hunting():
             "HASH": "File hash IOC",
             "PROCESS": "Process / executable",
             "COMMAND_LINE": "Command-line investigation",
-        }[value],
-        key="hunt_type"
+        }.get(value, value),
+        key="hunt_method"
     )
 
     c1, c2 = st.columns(2)
 
     indicator = c1.text_input(
         "Indicator / search value",
-        value=str(loaded.get("indicator") or ""),
-        placeholder="Example: 192.168.1.50 or powershell.exe"
+        placeholder="Example: 192.168.1.50 or powershell.exe",
+        key="hunt_indicator"
     )
 
     hostname = c2.text_input(
         "Hostname",
-        value=str(loaded.get("hostname") or "")
+        key="hunt_hostname"
     )
 
     c3, c4, c5 = st.columns(3)
 
     username = c3.text_input(
         "Username",
-        value=str(loaded.get("username") or "")
+        key="hunt_username"
     )
 
     event_id = c4.text_input(
         "Event ID",
-        value=str(loaded.get("event_id") or "")
+        key="hunt_event_id"
     )
 
     event_type = c5.text_input(
         "Event type",
-        value=str(loaded.get("event_type") or "")
+        key="hunt_event_type"
     )
 
     c6, c7 = st.columns(2)
 
     start_date = c6.date_input(
-    "Start date",
-    value=_date_value(loaded.get("start_date"), date.today()),
-    key="hunt_start_date"
-)
+        "Start date",
+        key="hunt_start_date"
+    )
 
     end_date = c7.date_input(
-    "End date",
-    value=_date_value(loaded.get("end_date"), date.today()),
-    key="hunt_end_date"
-)
+        "End date",
+        key="hunt_end_date"
+    )
 
     limit = st.slider(
         "Maximum results",
         min_value=50,
         max_value=2000,
-        value=300,
-        step=50
+        step=50,
+        key="hunt_limit"
     )
 
     if start_date > end_date:
@@ -239,11 +292,29 @@ def render_threat_hunting():
     # RUN HUNT
     # --------------------------------------------------
 
-    if st.button(
-        "⌕ Execute Threat Hunt",
-        type="primary",
-        use_container_width=True
-    ):
+    b_run, b_reset = st.columns([3, 1])
+    with b_run:
+        execute_hunt = st.button(
+            "⌕ Execute Threat Hunt",
+            type="primary",
+            use_container_width=True
+        )
+    with b_reset:
+        if st.button("↺ Reset filters", use_container_width=True):
+            st.session_state["hunt_method"] = "GENERAL"
+            st.session_state["hunt_indicator"] = ""
+            st.session_state["hunt_hostname"] = ""
+            st.session_state["hunt_username"] = ""
+            st.session_state["hunt_event_id"] = ""
+            st.session_state["hunt_event_type"] = ""
+            st.session_state["hunt_start_date"] = def_start
+            st.session_state["hunt_end_date"] = def_end
+            st.session_state["hunt_limit"] = 300
+            st.session_state.pop("advanced_hunt_results", None)
+            st.session_state.pop("advanced_hunt_query", None)
+            st.rerun()
+
+    if execute_hunt:
 
         try:
             events = search_hunt(
@@ -455,7 +526,9 @@ def render_threat_hunting():
                         description=hunt_description
                     )
 
-                    st.success("Hunting query saved successfully.")
+                    notify_success(f"Hunting query '{hunt_name}' saved successfully.")
+                    st.session_state["hunt_saved_expand"] = True
+                    st.rerun()
 
                 except Exception as exc:
                     st.error(f"Could not save hunt: {exc}")

@@ -146,6 +146,7 @@ def create_case(
     created_by,
     assigned_to=None,
     alert_ids=None,
+    allow_duplicate=False,
 ):
     """Create a case and optionally link existing alerts."""
 
@@ -184,6 +185,21 @@ def create_case(
     conn.row_factory = sqlite3.Row
 
     try:
+        # Prevent creating duplicate active cases with identical title
+        if not allow_duplicate:
+            existing = conn.execute("""
+                SELECT id, case_number, status
+                FROM incident_cases
+                WHERE LOWER(TRIM(title)) = LOWER(?)
+                  AND status IN ('OPEN', 'IN_PROGRESS')
+            """, (title,)).fetchone()
+
+            if existing:
+                raise ValueError(
+                    f"An active case with the title '{title}' already exists ({existing['case_number']}). "
+                    "Duplicating active cases is not permitted. Please update the existing case or choose a distinct title."
+                )
+
         # Validate all alerts before creating the case.
         for alert_id in alert_ids:
             alert = conn.execute("""

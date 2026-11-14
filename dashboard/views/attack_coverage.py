@@ -3,6 +3,7 @@
 
 import pandas as pd
 import streamlit as st
+from dashboard.notifications import notify_success
 
 from attack.engine import (
     create_attack_schema,
@@ -263,10 +264,9 @@ def render_attack_coverage():
                     description=description,
                 )
 
-                st.success(
+                notify_success(
                     f"Technique {registered_id} registered successfully."
                 )
-
                 st.rerun()
 
             except Exception as error:
@@ -348,8 +348,7 @@ def render_attack_coverage():
                         confidence=confidence,
                     )
 
-                    st.success("Alert mapped successfully.")
-
+                    notify_success(f"Alert {selected_alert['id']} mapped to {selected_technique['technique_id']} successfully.")
                     st.rerun()
 
                 except Exception as error:

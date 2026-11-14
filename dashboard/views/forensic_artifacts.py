@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import streamlit as st
+from dashboard.notifications import notify_success
 
 from forensics.engine import (
     ARTIFACT_TYPES, ARTIFACT_STATUSES,
@@ -44,7 +45,10 @@ def render_forensic_artifacts():
             )
 
     st.write("")
-    tab1, tab2, tab3 = st.tabs(["📋 Artifact Registry", "➕ Register Artifact", "📝 Manage Artifact"])
+    tab1, tab2, tab3 = st.tabs(
+        ["📋 Artifact Registry", "➕ Register Artifact", "📝 Manage Artifact"],
+        key="forensic_artifacts_active_tab",
+    )
 
     with tab1:
         f1, f2, f3 = st.columns([1, 1, 1])
@@ -75,7 +79,7 @@ def render_forensic_artifacts():
             st.info("No artifacts found with the current filters.")
 
     with tab2:
-        with st.form("register_artifact"):
+        with st.form("register_artifact", clear_on_submit=True):
             st.markdown("<div class='section-kicker'>REGISTER NEW ARTIFACT</div>", unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             art_type = c1.selectbox("Artifact type", ARTIFACT_TYPES)
@@ -107,7 +111,7 @@ def render_forensic_artifacts():
                             story_id=int(art_story) if art_story else None,
                             tags=tags,
                         )
-                        st.success(f"Artifact #{new_id} registered successfully.")
+                        notify_success(f"Artifact #{new_id} registered successfully.")
                         st.rerun()
                     except ValueError as exc:
                         st.error(str(exc))

@@ -160,7 +160,7 @@ def run_ioc_correlation(
             }
 
         # Load recent normalized events
-        event_rows = connection.execute("""
+        recent_rows = connection.execute("""
             SELECT id AS normalized_event_id,
                    event_id, timestamp_utc, hostname, username,
                    source_ip, destination_ip,
@@ -170,7 +170,43 @@ def run_ioc_correlation(
             LIMIT ?
         """, (int(event_limit),)).fetchall()
 
-        events = _dict_rows(event_rows)
+        events = _dict_rows(recent_rows)
+        seen_ids = {e["normalized_event_id"] for e in events}
+
+        # Include any historical events matching active IOCs across all telemetry
+        ip_iocs = [i["indicator"] for i in iocs if i["ioc_type"] == "IP"]
+        if ip_iocs:
+            placeholders = ",".join(["?"] * len(ip_iocs))
+            targeted_rows = connection.execute(f"""
+                SELECT id AS normalized_event_id,
+                       event_id, timestamp_utc, hostname, username,
+                       source_ip, destination_ip,
+                       image, command_line, extra_data_json
+                FROM normalized_events
+                WHERE source_ip IN ({placeholders}) OR destination_ip IN ({placeholders})
+            """, ip_iocs + ip_iocs).fetchall()
+            for r in targeted_rows:
+                rd = dict(r)
+                if rd["normalized_event_id"] not in seen_ids:
+                    events.append(rd)
+                    seen_ids.add(rd["normalized_event_id"])
+
+        for ioc in iocs:
+            if ioc["ioc_type"] != "IP":
+                text_rows = connection.execute("""
+                    SELECT id AS normalized_event_id,
+                           event_id, timestamp_utc, hostname, username,
+                           source_ip, destination_ip,
+                           image, command_line, extra_data_json
+                    FROM normalized_events
+                    WHERE image LIKE ? OR command_line LIKE ? OR extra_data_json LIKE ?
+                    LIMIT 200
+                """, (f"%{ioc['indicator']}%", f"%{ioc['indicator']}%", f"%{ioc['indicator']}%")).fetchall()
+                for r in text_rows:
+                    rd = dict(r)
+                    if rd["normalized_event_id"] not in seen_ids:
+                        events.append(rd)
+                        seen_ids.add(rd["normalized_event_id"])
 
     finally:
         connection.close()

@@ -437,8 +437,72 @@ def _domain_or_hash_match(indicator, text):
     ) is not None
 
 
-def enrich_event(event):
+def enrich_event(event, active_iocs=None):
     """Return matching active IOC records for one normalized event."""
+
+    if active_iocs is None:
+        expire_indicators()
+
+        connection = get_connection()
+        connection.row_factory = sqlite3.Row
+
+        try:
+            active_iocs = [dict(row) for row in connection.execute("""
+                SELECT *
+                FROM ioc_indicators
+                WHERE is_active = 1
+            """).fetchall()]
+        finally:
+            connection.close()
+
+    text = _extract_text_fields(event)
+
+    source_ip = str(event.get("source_ip") or "").strip()
+    destination_ip = str(event.get("destination_ip") or "").strip()
+
+    matches = []
+
+    for item_raw in active_iocs:
+        item = dict(item_raw)
+
+        ioc_type = item["ioc_type"]
+        indicator = item["indicator"]
+
+        matched = False
+        matched_field = None
+
+        if ioc_type == "IP":
+            if source_ip == indicator:
+                matched = True
+                matched_field = "source_ip"
+
+            elif destination_ip == indicator:
+                matched = True
+                matched_field = "destination_ip"
+
+        elif ioc_type == "URL":
+            matched = _domain_or_hash_match(
+                indicator,
+                text
+            )
+            matched_field = "event_text"
+
+        else:
+            matched = _domain_or_hash_match(
+                indicator,
+                text
+            )
+            matched_field = "event_text"
+
+        if matched:
+            item["matched_field"] = matched_field
+            matches.append(item)
+
+    return matches
+
+
+def enrich_events(events):
+    """Enrich a list of normalized events."""
 
     expire_indicators()
 
@@ -446,69 +510,19 @@ def enrich_event(event):
     connection.row_factory = sqlite3.Row
 
     try:
-        iocs = connection.execute("""
+        active_iocs = [dict(row) for row in connection.execute("""
             SELECT *
             FROM ioc_indicators
             WHERE is_active = 1
-        """).fetchall()
-
-        text = _extract_text_fields(event)
-
-        source_ip = str(event.get("source_ip") or "").strip()
-        destination_ip = str(event.get("destination_ip") or "").strip()
-
-        matches = []
-
-        for row in iocs:
-            item = dict(row)
-
-            ioc_type = item["ioc_type"]
-            indicator = item["indicator"]
-
-            matched = False
-            matched_field = None
-
-            if ioc_type == "IP":
-                if source_ip == indicator:
-                    matched = True
-                    matched_field = "source_ip"
-
-                elif destination_ip == indicator:
-                    matched = True
-                    matched_field = "destination_ip"
-
-            elif ioc_type == "URL":
-                matched = _domain_or_hash_match(
-                    indicator,
-                    text
-                )
-                matched_field = "event_text"
-
-            else:
-                matched = _domain_or_hash_match(
-                    indicator,
-                    text
-                )
-                matched_field = "event_text"
-
-            if matched:
-                item["matched_field"] = matched_field
-                matches.append(item)
-
-        return matches
-
+        """).fetchall()]
     finally:
         connection.close()
-
-
-def enrich_events(events):
-    """Enrich a list of normalized events."""
 
     results = []
 
     for event in events:
         item = dict(event)
-        matches = enrich_event(event)
+        matches = enrich_event(event, active_iocs=active_iocs)
 
         item["threat_intel_matches"] = matches
         item["threat_intel_match_count"] = len(matches)

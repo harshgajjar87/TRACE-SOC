@@ -5,6 +5,7 @@ import json
 
 import pandas as pd
 import streamlit as st
+from dashboard.notifications import notify_success
 
 from risk.engine import (
     create_risk_schema,
@@ -62,10 +63,9 @@ def render_risk_intelligence():
 
                     results = assess_all_alerts()
 
-                st.success(
+                notify_success(
                     f"Assessment completed for {len(results)} alerts."
                 )
-
                 st.rerun()
 
             except Exception as error:
@@ -209,8 +209,7 @@ def render_risk_intelligence():
                     save=True,
                 )
 
-                st.success("Risk assessment updated.")
-
+                notify_success(f"Risk assessment updated for alert #{selected_alert_id}.")
                 st.rerun()
 
             except Exception as error:

@@ -18,6 +18,7 @@ from cases.engine import (
 )
 
 from response.engine import get_available_alerts
+from dashboard.notifications import notify_success
 
 
 def render_case_management():
@@ -54,11 +55,14 @@ def render_case_management():
 
     st.divider()
 
-    tab1, tab2, tab3 = st.tabs([
-        "Case Overview",
-        "Create Case",
-        "Case Investigation",
-    ])
+    tab1, tab2, tab3 = st.tabs(
+        [
+            "Case Overview",
+            "Create Case",
+            "Case Investigation",
+        ],
+        key="case_management_active_tab",
+    )
 
     # --------------------------------------------------
     # TAB 1: CASE OVERVIEW
@@ -125,7 +129,7 @@ def render_case_management():
 
         alerts = get_available_alerts()
 
-        with st.form("create_case_form"):
+        with st.form("create_case_form", clear_on_submit=True):
 
             title = st.text_input(
                 "Case title",
@@ -197,11 +201,10 @@ def render_case_management():
                         alert_ids=selected_alert_ids,
                     )
 
-                    st.success(
+                    notify_success(
                         f"Case created successfully! Case ID: "
                         f"TRACE-CASE-{case_id:05d}"
                     )
-
                     st.rerun()
 
                 except Exception as error:
@@ -316,8 +319,7 @@ def render_case_management():
                                 assigned_to=new_assigned_to,
                             )
 
-                            st.success("Case updated successfully.")
-
+                            notify_success(f"Case TRACE-CASE-{case_id:05d} updated successfully.")
                             st.rerun()
 
                         except Exception as error:
@@ -376,8 +378,7 @@ def render_case_management():
                                 link_analyst,
                             )
 
-                            st.success("Alert linked successfully.")
-
+                            notify_success(f"Alert {selected_alert} linked to case successfully.")
                             st.rerun()
 
                         except Exception as error:
@@ -458,8 +459,7 @@ def render_case_management():
                                 note_text,
                             )
 
-                            st.success("Investigation note added.")
-
+                            notify_success(f"Investigation note added to case #{case_id}.")
                             st.rerun()
 
                         except Exception as error:

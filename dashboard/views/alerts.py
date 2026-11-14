@@ -4,6 +4,7 @@
 import streamlit as st
 
 import json
+from dashboard.notifications import notify_success
 
 from dashboard.data_access import (
     ALERT_STATUSES,
@@ -423,9 +424,7 @@ def render_alert_management():
             )
 
             if updated:
-                st.success(
-                    "Alert status successfully updated."
-                )
+                notify_success("Alert status successfully updated.")
                 st.rerun()
 
             else:

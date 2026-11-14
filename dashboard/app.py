@@ -62,6 +62,7 @@ from forensics.engine import create_forensics_schema
 
 from threat_intel.correlator import create_ioc_correlation_schema
 from dashboard.styles import inject_styles
+from dashboard.notifications import render_notifications
 
 st.set_page_config(
     page_title="CYFROG | An Intelligent TRACE System",
@@ -224,9 +225,25 @@ st.sidebar.markdown(
 
 workspace_names = list(WORKSPACES.keys())
 
-# Persist the active workspace in session state
+# Restore from URL query params (so browser refresh or link sharing keeps the current page)
+qp_ws = st.query_params.get("ws")
+qp_page = st.query_params.get("page")
+
 if "active_workspace" not in st.session_state:
-    st.session_state["active_workspace"] = workspace_names[0]
+    if qp_ws and qp_ws in WORKSPACES:
+        st.session_state["active_workspace"] = qp_ws
+    else:
+        st.session_state["active_workspace"] = workspace_names[0]
+
+active_ws_name = st.session_state["active_workspace"]
+active_ws = WORKSPACES[active_ws_name]
+
+if "active_page" not in st.session_state:
+    if qp_page and qp_page in active_ws["pages"]:
+        st.session_state["active_page"] = qp_page
+        st.session_state[f"module_radio_{active_ws_name}"] = qp_page
+    else:
+        st.session_state["active_page"] = active_ws["pages"][0]
 
 for ws_name in workspace_names:
     ws = WORKSPACES[ws_name]
@@ -249,6 +266,8 @@ for ws_name in workspace_names:
             target_page = ws["pages"][0]
             st.session_state["active_page"] = target_page
             st.session_state[f"module_radio_{ws_name}"] = target_page
+        st.query_params["ws"] = st.session_state["active_workspace"]
+        st.query_params["page"] = target_page
         st.rerun()
 
     # ── Module list — only shown for the active workspace ──────────────
@@ -275,6 +294,8 @@ for ws_name in workspace_names:
             key=radio_key,
         )
         st.session_state["active_page"] = page
+        st.query_params["ws"] = active_ws_name
+        st.query_params["page"] = page
 
         st.sidebar.markdown("<div class='ws-divider'></div>", unsafe_allow_html=True)
 
@@ -284,6 +305,8 @@ active_ws = WORKSPACES[active_ws_name]
 if "active_page" not in st.session_state or st.session_state["active_page"] not in active_ws["pages"]:
     st.session_state["active_page"] = active_ws["pages"][0]
 page = st.session_state["active_page"]
+st.query_params["ws"] = active_ws_name
+st.query_params["page"] = page
 
 # ── Status / footer ────────────────────────────────────────────────────────
 st.sidebar.markdown(
@@ -321,7 +344,8 @@ def page_header(title: str, subtitle: str, section: str | None = None):
 
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-        if st.button("↻ Refresh", use_container_width=True):
+        refresh_key = f"hdr_refresh_{active_ws_name.lower().replace(' ', '_')}_{page.lower().replace(' ', '_')}"
+        if st.button("↻ Refresh", key=refresh_key, use_container_width=True):
 
             st.rerun()
 
@@ -539,43 +563,6 @@ def threat_hunting():
 
     render_threat_hunting()
 
-def evidence_page():
-
-    page_header("Evidence & Integrity", "Retrieve linked evidence and verify stored XML against its recorded SHA-256 baseline.", "DFIR  /  EVIDENCE VAULT")
-
-    story_id = st.number_input("Investigation story ID", min_value=1, step=1)
-
-    if st.button("Load linked evidence", type="primary"):
-
-        try:
-
-            st.session_state["evidence_records"] = get_story_evidence(int(story_id))
-
-        except Exception as exc:
-
-            st.error(str(exc))
-
-    records = st.session_state.get("evidence_records", [])
-
-    if records:
-
-        checks = []
-
-        for item in records:
-
-            check = verify_raw_event_integrity(item["raw_event_id"])
-
-            checks.append({"raw_event_id":item["raw_event_id"], "source_file":item.get("source_file"),
-
-                           "raw_xml_sha256":item.get("raw_xml_sha256"), "status":check["status"]})
-
-        show_table(checks)
-
-        st.caption("VERIFIED means the stored XML blob matches its recorded hash baseline; it does not independently prove original evidence authenticity.")
-
-    elif "evidence_records" in st.session_state:
-
-        st.info("No linked evidence records found for this story.")
 
 def detection_intelligence():
 
@@ -788,6 +775,8 @@ PAGE_FUNCTIONS = {
     "System Health": system_health,
 
 }
+
+render_notifications()
 
 PAGE_FUNCTIONS[page]()
 

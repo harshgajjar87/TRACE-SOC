@@ -2,6 +2,7 @@
 
 import streamlit as st
 import pandas as pd
+from dashboard.notifications import notify_success
 
 from response.engine import (
     create_response_schema,
@@ -57,11 +58,14 @@ def render_incident_response():
 
     st.divider()
 
-    tab1, tab2, tab3 = st.tabs([
-        "Run Playbook",
-        "Response History",
-        "Evidence Verification",
-    ])
+    tab1, tab2, tab3 = st.tabs(
+        [
+            "Run Playbook",
+            "Response History",
+            "Evidence Verification",
+        ],
+        key="incident_response_active_tab",
+    )
 
     # --------------------------------------------------
     # TAB 1: RUN PLAYBOOK
@@ -214,10 +218,9 @@ def render_incident_response():
                             approval_note=approval_note,
                         )
 
-                        st.success(
+                        notify_success(
                             f"Playbook executed successfully! Run ID: {run_id}"
                         )
-
                         st.rerun()
 
                     except Exception as error:

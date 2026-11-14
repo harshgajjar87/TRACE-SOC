@@ -4,6 +4,7 @@
 import json
 import streamlit as st
 import pandas as pd
+from dashboard.notifications import notify_success
 
 from pathlib import Path
 
@@ -24,12 +25,64 @@ from threat_intel.engine import (
 from database.db import get_connection
 
 
-def get_recent_events(limit=500):
+def get_events_to_enrich(scope="Active IOC Candidates (Database)", limit=500, host_filter=None):
+    """Retrieve normalized events for threat intelligence enrichment."""
     connection = get_connection()
     connection.row_factory = __import__("sqlite3").Row
 
     try:
-        rows = connection.execute("""
+        if scope == "Active IOC Candidates (Database)":
+            iocs = connection.execute(
+                "SELECT indicator, ioc_type FROM ioc_indicators WHERE is_active = 1"
+            ).fetchall()
+
+            ip_indicators = [r["indicator"] for r in iocs if r["ioc_type"] == "IP"]
+            other_indicators = [r["indicator"] for r in iocs if r["ioc_type"] != "IP"]
+
+            conditions = []
+            params = []
+
+            if ip_indicators:
+                placeholders = ",".join(["?"] * len(ip_indicators))
+                conditions.append(f"source_ip IN ({placeholders}) OR destination_ip IN ({placeholders})")
+                params.extend(ip_indicators)
+                params.extend(ip_indicators)
+
+            for ind in other_indicators:
+                pattern = f"%{ind}%"
+                conditions.append("(image LIKE ? OR command_line LIKE ? OR extra_data_json LIKE ?)")
+                params.extend([pattern, pattern, pattern])
+
+            if conditions:
+                where_clause = " OR ".join(f"({c})" for c in conditions)
+                if host_filter and host_filter.strip():
+                    where_clause = f"({where_clause}) AND hostname LIKE ?"
+                    params.append(f"%{host_filter.strip()}%")
+
+                sql = f"""
+                    SELECT
+                        id AS normalized_event_id,
+                        event_id,
+                        timestamp_utc,
+                        hostname,
+                        username,
+                        source_ip,
+                        destination_ip,
+                        image,
+                        command_line,
+                        extra_data_json
+                    FROM normalized_events
+                    WHERE {where_clause}
+                    ORDER BY timestamp_utc DESC, id DESC
+                    LIMIT ?
+                """
+                params.append(limit)
+                rows = connection.execute(sql, params).fetchall()
+                if rows:
+                    return [dict(r) for r in rows]
+
+        # Recent events scope fallback
+        sql = """
             SELECT
                 id AS normalized_event_id,
                 event_id,
@@ -42,14 +95,24 @@ def get_recent_events(limit=500):
                 command_line,
                 extra_data_json
             FROM normalized_events
-            ORDER BY timestamp_utc DESC, id DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
+        """
+        params = []
+        if host_filter and host_filter.strip():
+            sql += " WHERE hostname LIKE ?"
+            params.append(f"%{host_filter.strip()}%")
 
+        sql += " ORDER BY timestamp_utc DESC, id DESC LIMIT ?"
+        params.append(limit)
+
+        rows = connection.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
     finally:
         connection.close()
+
+
+def get_recent_events(limit=500):
+    return get_events_to_enrich(scope="Recent Ingested Telemetry", limit=limit)
 
 
 def render_threat_intelligence():
@@ -57,12 +120,17 @@ def render_threat_intelligence():
     create_threat_intel_schema()
     expire_indicators()
 
-    st.markdown("## 🧠 Threat Intelligence Center")
-
-    st.caption(
-        "Manage local IOC intelligence, enrich endpoint events "
-        "and investigate known indicators."
-    )
+    h_col1, h_col2 = st.columns([4, 1])
+    with h_col1:
+        st.markdown("## 🧠 Threat Intelligence Center")
+        st.caption(
+            "Manage local IOC intelligence, enrich endpoint events "
+            "and investigate known indicators."
+        )
+    with h_col2:
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        if st.button("↻ Refresh Intel", key="refresh_threat_intel_btn", use_container_width=True):
+            st.rerun()
 
     summary = get_threat_intel_summary()
 
@@ -82,13 +150,16 @@ def render_threat_intelligence():
     # TABS
     # -------------------------------------------------
 
-    tab_overview, tab_add, tab_import, tab_lookup, tab_enrich = st.tabs([
-        "Overview",
-        "Add IOC",
-        "Import Feed",
-        "IOC Lookup",
-        "Event Enrichment",
-    ])
+    tab_overview, tab_add, tab_import, tab_lookup, tab_enrich = st.tabs(
+        [
+            "Overview",
+            "Add IOC",
+            "Import Feed",
+            "IOC Lookup",
+            "Event Enrichment",
+        ],
+        key="threat_intel_active_tab",
+    )
 
     # -------------------------------------------------
     # OVERVIEW
@@ -248,9 +319,10 @@ def render_threat_intelligence():
                         ],
                     )
 
-                    st.success(
-                        f"Indicator saved successfully. ID: {indicator_id}"
+                    notify_success(
+                        f"Indicator '{indicator}' saved successfully (ID: {indicator_id})."
                     )
+                    st.rerun()
 
                 except (ValueError, TypeError) as exc:
                     st.error(str(exc))
@@ -395,28 +467,53 @@ def render_threat_intelligence():
     with tab_enrich:
 
         st.markdown("### Enrich endpoint events")
-
-        limit = st.slider(
-            "Number of recent events to inspect",
-            50,
-            1000,
-            300,
-            step=50,
-            key="intel_enrichment_limit"
+        st.caption(
+            "Correlate stored endpoint telemetry against active threat intelligence indicators (IPs, domains, hashes)."
         )
 
-        if st.button(
-            "Run IOC enrichment",
-            type="primary"
-        ):
+        e_col1, e_col2, e_col3 = st.columns([2, 1, 1])
+        with e_col1:
+            scope = st.selectbox(
+                "Inspection Scope",
+                [
+                    "Active IOC Candidates (Database)",
+                    "Recent Ingested Telemetry",
+                ],
+                index=0,
+                key="intel_enrichment_scope",
+                help="Active IOC Candidates searches all stored events for values touching active threat indicators."
+            )
+
+        with e_col2:
+            limit = st.slider(
+                "Event Limit",
+                50,
+                2000,
+                500,
+                step=50,
+                key="intel_enrichment_limit"
+            )
+
+        with e_col3:
+            host_filter = st.text_input("Hostname filter (optional)", key="intel_enrich_host")
+
+        b_enrich_col, _ = st.columns([1, 3])
+        with b_enrich_col:
+            run_enrichment = st.button(
+                "Run IOC enrichment",
+                type="primary",
+                key="btn_run_enrichment",
+                use_container_width=True,
+            )
+
+        if run_enrichment:
 
             try:
-
-                events = get_recent_events(limit)
-
+                events = get_events_to_enrich(scope=scope, limit=limit, host_filter=host_filter)
                 results = enrich_events(events)
 
                 st.session_state["intel_enrichment_results"] = results
+                st.session_state["intel_enrichment_scope_used"] = scope
 
             except Exception as exc:
                 st.error(f"Enrichment failed: {exc}")
@@ -456,6 +553,7 @@ def render_threat_intelligence():
                             "Confidence": ioc["confidence"],
                             "Severity": ioc["severity"],
                             "Matched Field": ioc["matched_field"],
+                            "Description": ioc.get("description") or "",
                         })
 
                 st.dataframe(
@@ -467,12 +565,12 @@ def render_threat_intelligence():
                 st.download_button(
                     "Export enrichment results",
                     data=pd.DataFrame(rows).to_csv(index=False),
-                    file_name="TRACE-SOC-ioc-enrichment.csv",
+                    file_name="CYFROG-ioc-enrichment.csv",
                     mime="text/csv"
                 )
 
             else:
                 st.info(
-                    "No known indicators matched the selected events. "
-                    "This does not prove the events are benign."
+                    "No known indicators matched the selected events in this scope. "
+                    "Try switching the scope to 'Active IOC Candidates (Database)' or broadening your filters."
                 )

@@ -52,12 +52,15 @@ def render_evidence():
         key="evidence_actor",
     )
 
-    inventory_tab, story_tab, verify_tab, audit_tab = st.tabs([
-        "Evidence Inventory",
-        "Story Evidence",
-        "Integrity & Export",
-        "Chain of Custody",
-    ])
+    inventory_tab, story_tab, verify_tab, audit_tab = st.tabs(
+        [
+            "Evidence Inventory",
+            "Story Evidence",
+            "Integrity & Export",
+            "Chain of Custody",
+        ],
+        key="evidence_active_tab",
+    )
 
     with inventory_tab:
         st.subheader("Stored Evidence Inventory")
