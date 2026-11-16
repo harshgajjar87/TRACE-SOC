@@ -478,5 +478,35 @@ DETECTION_RULES = [
         "event_id": "104",
         "mitre_tactic": "Defense Evasion",
         "mitre_technique": "T1070.001"
-    }
+    },
+
+
+{
+    "rule_id": "TS025",
+    "name": "Suspicious PowerShell Script Block Activity",
+    "description": (
+        "PowerShell script block contains indicators of "
+        "possible LSASS memory dumping."
+    ),
+    "category": "credential_access",
+    "rule_type": "keyword",
+    "severity": "HIGH",
+
+    "provider": "Microsoft-Windows-PowerShell",
+    "channel": "Microsoft-Windows-PowerShell/Operational",
+    "event_id": "4104",
+
+    "search_fields": [
+        "ScriptBlockText"
+    ],
+
+    "keywords": [
+        "MiniDumpWriteDump",
+        "MiniDumpWithFullMemory",
+        "Get-Process lsass"
+    ],
+
+    "mitre_tactic": "Credential Access",
+    "mitre_technique": "T1003.001"
+}
 ]

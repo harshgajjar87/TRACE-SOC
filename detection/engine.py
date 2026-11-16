@@ -470,6 +470,7 @@ def evaluate_sequence_rule(events, rule):
 # 3. EXECUTION DETECTION
 # ==========================================================
 
+
 def evaluate_keyword_rule(events, rule):
 
     alerts = []
@@ -479,30 +480,41 @@ def evaluate_keyword_rule(events, rule):
         if not event_matches(event, rule):
             continue
 
-        image = (
-            event.get("image") or ""
-        ).lower()
+        # Check process image only when the rule requires it.
+        expected_image = rule.get("process_image_contains")
 
-        command = (
-            event.get("command_line") or ""
-        ).lower()
+        if expected_image:
+            image = str(event.get("image") or "").lower()
 
-        expected_image = rule.get(
-            "process_image_contains", "powershell"
-        ).lower()
+            if expected_image.lower() not in image:
+                continue
 
-        if expected_image not in image:
-            continue
+        # Allow rules to search different event fields.
+        search_fields = rule.get(
+            "search_fields",
+            ["command_line"]
+        )
+
+        searchable_text = []
+
+        for field in search_fields:
+            value = get_field(event, field)
+
+            if value:
+                searchable_text.append(str(value).lower())
+
+        combined_text = "\n".join(searchable_text)
 
         matched_keywords = [
             keyword
             for keyword in rule["keywords"]
-            if keyword.lower() in command
+            if keyword.lower() in combined_text
         ]
 
         if not matched_keywords:
             continue
 
+        # Preserve existing parent-process suppression.
         suppress_parents = [
             s.lower()
             for s in rule.get("suppress_parent_cmdline_contains", [])
@@ -510,11 +522,13 @@ def evaluate_keyword_rule(events, rule):
 
         if suppress_parents:
             extra = get_extra_data(event)
+
             parent_cmdline = str(
                 get_field(event, "parent_command_line", "ParentCommandLine")
                 or extra.get("ParentCommandLine")
                 or ""
             ).lower()
+
             if any(s in parent_cmdline for s in suppress_parents):
                 continue
 

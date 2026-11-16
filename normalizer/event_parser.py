@@ -1,3 +1,4 @@
+
 import xml.etree.ElementTree as ET
 
 
@@ -83,12 +84,29 @@ def extract_event_data(root):
 
     event_data = {}
 
+    # Extract traditional EventData fields.
     for data in root.iter():
+
         if data.tag.split("}")[-1] == "Data":
 
             field_name = data.get("Name")
 
             if field_name:
                 event_data[field_name] = data.text
+
+    # Extract UserData fields from Windows events.
+    user_data = find_tag(root, "UserData")
+
+    if user_data is not None:
+
+        for element in user_data.iter():
+
+            # Extract leaf elements only.
+            if len(element) == 0:
+
+                field_name = element.tag.split("}")[-1]
+
+                if field_name and field_name not in event_data:
+                    event_data[field_name] = element.text
 
     return event_data
